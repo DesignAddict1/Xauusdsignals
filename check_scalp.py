@@ -21,7 +21,7 @@ def main():
     bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-    data = fetch_series("XAU/USD", "15min", 100, api_key)
+    data = fetch_series("XAU/USD", "15min", 300, api_key)
     closes, highs, lows = data["closes"], data["highs"], data["lows"]
 
     print(f"[scalp] raw candles from API: {data['raw_count']}, after weekday filter: {len(closes)}")
