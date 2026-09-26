@@ -21,6 +21,10 @@ def main():
     bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
+        # outputsize is generous because Twelve Data pads through closed-market
+    # weekends with placeholder timestamps; those get stripped by the
+    # weekday filter, so we need enough headroom to still have 22+ real
+    # weekday candles left over after that filtering.
     data = fetch_series("XAU/USD", "15min", 300, api_key)
     closes, highs, lows = data["closes"], data["highs"], data["lows"]
 
