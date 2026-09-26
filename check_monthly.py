@@ -23,6 +23,7 @@ def main():
 
     data = fetch_series("XAU/USD", "1day", 260, api_key)
     closes, highs, lows = data["closes"], data["highs"], data["lows"]
+    print(f"[monthly] raw candles from API: {data['raw_count']}, after weekday filter: {len(closes)}")
 
     ema50, ema200 = ema(closes, 50), ema(closes, 200)
     rsi14 = rsi(closes, 14)
