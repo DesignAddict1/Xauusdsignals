@@ -2,7 +2,7 @@ name: Scalp signal check
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+       - cron: "*/15 * * * 1-5"
   workflow_dispatch: {}
 
 permissions:
