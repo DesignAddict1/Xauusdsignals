@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>XAU/USD Signal Desk</title>
+<style>
+  :root{
+    --bg:#11151a; --panel:#171c22; --line:#262d35;
+    --gold:#c9a227; --green:#5fae87; --red:#c1503d;
+    --text:#e9e6dd; --muted:#8a9099;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:inherit}
+  html{scroll-padding-top:env(safe-area-inset-top,0px); height:100%}
+  body{
+    height:100%; margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  .num{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{
+    padding:18px 16px 14px; border-bottom:1px solid var(--line);
+    position:sticky; top:env(safe-area-inset-top,0px); background:var(--bg); z-index:5;
+  }
+  h1{font-size:17px; margin:0 0 2px; font-weight:600; letter-spacing:.2px}
+  .sub{color:var(--muted); font-size:12.5px}
+  .keyrow{display:flex; gap:8px; margin-top:12px}
+  input[type=password]{
+    flex:1; background:var(--panel); border:1px solid var(--line); color:var(--text);
+    padding:9px 10px; border-radius:6px; font-size:14px; min-width:0;
+  }
+  button{
+    background:var(--gold); color:#141414; border:none; border-radius:6px;
+    padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  button:disabled{opacity:.5}
+  button.ghost{background:transparent; border:1px solid var(--line); color:var(--text); font-weight:500}
+  main{padding:16px; max-width:640px; margin:0 auto}
+  .price{display:flex; align-items:baseline; gap:10px; margin:14px 0 18px}
+  .price .val{font-size:30px; font-weight:700}
+  .price .chg{font-size:14px; font-weight:600}
+  .up{color:var(--green)} .down{color:var(--red)} .flat{color:var(--muted)}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:16px; margin-bottom:14px;
+  }
+  .panel h2{font-size:13.5px; margin:0 0 12px; color:var(--muted); font-weight:600}
+  .verdict{display:flex; align-items:center; gap:10px; margin-bottom:14px}
+  .dot{width:10px; height:10px; border-radius:50%; flex-shrink:0}
+  .verdict .label{font-size:19px; font-weight:700}
+  .verdict .why{color:var(--muted); font-size:12.5px; margin-top:2px}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .stat{border-top:1px solid var(--line); padding-top:8px}
+  .stat .k{font-size:11px; color:var(--muted); margin-bottom:3px}
+  .stat .v{font-size:14.5px; font-weight:600}
+  .callbox{border-top:1px solid var(--line); margin-top:14px; padding-top:12px}
+  .callhead{font-size:15px; font-weight:700; letter-spacing:.3px}
+  .callwhy{color:var(--muted); font-size:12px; margin-top:8px; line-height:1.4}
+  .empty{color:var(--muted); font-size:13px; text-align:center; padding:20px 10px}
+  .err{color:var(--red); font-size:13px; margin-top:10px}
+  footer{color:var(--muted); font-size:11.5px; text-align:center; padding:6px 16px 24px}
+  @media (max-width:380px){ .price .val{font-size:26px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>XAU/USD Signal Desk</h1>
+  <div class="sub">Rule-based trend &amp; scalp read, backtested against real historical data</div>
+  <div class="keyrow">
+    <input id="apiKey" type="password" placeholder="Twelve Data API key">
+    <button id="loadBtn">Load</button>
+  </div>
+</header>
+<main>
+  <div id="priceRow" class="price">
+    <span class="val num" id="priceVal">—</span>
+    <span class="chg" id="priceChg"></span>
+  </div>
+  <div id="content">
+    <div class="empty">Paste a free Twelve Data API key above and tap Load to pull live XAU/USD data.<br><br>No key yet? Sign up free at twelvedata.com — the free tier covers this easily.</div>
+  </div>
+  <div id="errBox" class="err"></div>
+</main>
+<footer>Rule-based technical signals, not financial advice. Verify before trading.</footer>
+
+<script>
+const KEY_STORE = "xau_dashboard_apikey";
+const $ = id => document.getElementById(id);
+$("apiKey").value = localStorage.getItem(KEY_STORE) || "";
+
+$("loadBtn").addEventListener("click", loadAll);
+
+function ema(values, period){
+  const k = 2/(period+1);
+  const out = [values[0]];
+  for(let i=1;i<values.length;i++) out.push(values[i]*k + out[i-1]*(1-k));
+  return out;
+}
+function rsi(values, period){
+  let gains=0, losses=0;
+  for(let i=1;i<=period;i++){
+    const d = values[i]-values[i-1];
+    if(d>=0) gains+=d; else losses-=d;
+  }
+  let avgG=gains/period, avgL=losses/period;
+  const out = new Array(period).fill(null);
+  out.push(100 - 100/(1+ (avgL===0?100:avgG/avgL)));
+  for(let i=period+1;i<values.length;i++){
+    const d = values[i]-values[i-1];
+    const g = d>0?d:0, l = d<0?-d:0;
+    avgG = (avgG*(period-1)+g)/period;
+    avgL = (avgL*(period-1)+l)/period;
+    out.push(100 - 100/(1+ (avgL===0?100:avgG/avgL)));
+  }
+  return out;
+}
+function atr(highs, lows, closes, period){
+  const trs=[highs[0]-lows[0]];
+  for(let i=1;i<highs.length;i++){
+    trs.push(Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1])));
+  }
+  const out=[];
+  let sum=trs.slice(0,period).reduce((a,b)=>a+b,0);
+  out[period-1]=sum/period;
+  for(let i=period;i<trs.length;i++){
+    out[i]=(out[i-1]*(period-1)+trs[i])/period;
+  }
+  return out;
+}
+function last(arr){ return arr[arr.length-1]; }
+
+function isWeekday(dtStr){
+  const [y,m,d] = dtStr.slice(0,10).split("-").map(Number);
+  const day = new Date(Date.UTC(y, m-1, d)).getUTCDay();
+  return day !== 0 && day !== 6; // drop Sat/Sun timestamps
+}
+
+async function fetchSeries(symbol, interval, outputsize, key){
+  const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${interval}&outputsize=${outputsize}&apikey=${key}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(data.status === "error" || data.code) throw new Error(data.message || "API error");
+  const rows = data.values.slice().reverse().filter(r => isWeekday(r.datetime)); // oldest -> newest, business days only
+  return {
+    closes: rows.map(r=>parseFloat(r.close)),
+    highs: rows.map(r=>parseFloat(r.high)),
+    lows: rows.map(r=>parseFloat(r.low)),
+    times: rows.map(r=>r.datetime)
+  };
+}
+
+function tradeCallBlock(tone, price, atr, mult){
+  if(tone === "flat"){
+    return `<div class="callbox"><div class="callhead">No trade call</div>
+      <div class="callwhy">Signal is unconfirmed — wait for the trend or momentum to align before sizing a position.</div></div>`;
+  }
+  const isBuy = tone === "up";
+  const entryNear = price;
+  const entryFar = isBuy ? price - mult.entry*atr : price + mult.entry*atr;
+  const entryLow = Math.min(entryNear, entryFar), entryHigh = Math.max(entryNear, entryFar);
+  const stop = isBuy ? entryLow - mult.stop*atr : entryHigh + mult.stop*atr;
+  const target = isBuy ? entryHigh + mult.target*atr : entryLow - mult.target*atr;
+  return `<div class="callbox">
+    <div class="callhead ${isBuy?"up":"down"}">${isBuy?"BUY":"SELL"} ${entryLow.toFixed(2)} – ${entryHigh.toFixed(2)}</div>
+    <div class="grid" style="margin-top:8px">
+      <div class="stat"><div class="k">Stop-loss</div><div class="v num down">${stop.toFixed(2)}</div></div>
+      <div class="stat"><div class="k">Take-profit</div><div class="v num up">${target.toFixed(2)}</div></div>
+    </div>
+    <div class="callwhy">ATR-based levels, ~1:2 risk-reward. Confirm before entering — not a guaranteed fill.</div>
+  </div>`;
+}
+
+function verdictBlock(label, why, tone){
+  const color = tone==="up" ? "var(--green)" : tone==="down" ? "var(--red)" : "var(--muted)";
+  const cls = tone==="up"?"up":tone==="down"?"down":"flat";
+  return `<div class="verdict"><span class="dot" style="background:${color}"></span>
+    <div><div class="label ${cls}">${label}</div><div class="why">${why}</div></div></div>`;
+}
+
+// Same rules as the live signal, reusable for backtesting (no lookahead — each call only sees data up to index i)
+function trendToneAt(e50,e200,r14){
+  if(e50 > e200 && r14 > 50) return "up";
+  if(e50 < e200 && r14 < 50) return "down";
+  return "flat";
+}
+function scalpToneAt(e9,e21,r15){
+  if(e9 > e21 && r15 > 50 && r15 < 75) return "up";
+  if(e9 < e21 && r15 < 50 && r15 > 25) return "down";
+  if(r15 >= 75) return "down";
+  if(r15 <= 25) return "up";
+  return "flat";
+}
+
+// Walk forward through history, fire a "trade" whenever the rule set gives a directional tone,
+// then check which comes first: the ATR stop or the ATR target, within maxHold bars.
+function runBacktest(highs, lows, closes, fastArr, slowArr, rsiArr, atrArr, toneFn, mult, maxHold, startIdx){
+  const trades = [];
+  let i = startIdx;
+  while(i < closes.length - 2){
+    const f=fastArr[i], s=slowArr[i], r=rsiArr[i], a=atrArr[i];
+    if(f==null||s==null||r==null||a==null||isNaN(r)){ i++; continue; }
+    const tone = toneFn(f,s,r);
+    if(tone === "flat"){ i++; continue; }
+    const isBuy = tone === "up";
+    const entry = closes[i];
+    const stop = isBuy ? entry - mult.stop*a : entry + mult.stop*a;
+    const target = isBuy ? entry + mult.target*a : entry - mult.target*a;
+    const endIdx = Math.min(i+maxHold, closes.length-1);
+    let exitPrice = closes[endIdx], exitIdx = endIdx;
+    for(let j=i+1;j<=endIdx;j++){
+      if(isBuy){
+        if(lows[j] <= stop){ exitPrice=stop; exitIdx=j; break; }
+        if(highs[j] >= target){ exitPrice=target; exitIdx=j; break; }
+      } else {
+        if(highs[j] >= stop){ exitPrice=stop; exitIdx=j; break; }
+        if(lows[j] <= target){ exitPrice=target; exitIdx=j; break; }
+      }
+    }
+    trades.push({pnl: isBuy ? exitPrice-entry : entry-exitPrice});
+    i = exitIdx + 1;
+  }
+  return trades;
+}
+function summarize(trades){
+  if(!trades.length) return null;
+  const wins = trades.filter(t=>t.pnl>0), losses = trades.filter(t=>t.pnl<=0);
+  const sum = arr => arr.reduce((a,t)=>a+t.pnl,0);
+  const winRate = wins.length/trades.length*100;
+  const avgWin = wins.length ? sum(wins)/wins.length : 0;
+  const avgLoss = losses.length ? sum(losses)/losses.length : 0;
+  const expectancy = sum(trades)/trades.length;
+  const profitFactor = losses.length ? Math.abs(sum(wins)/sum(losses)) : (wins.length?Infinity:0);
+  return {count:trades.length, winRate, avgWin, avgLoss, expectancy, profitFactor};
+}
+function backtestPanel(title, stats){
+  if(!stats) return `<div class="panel"><h2>${title}</h2><div class="empty">Not enough historical signals in the fetched window to test.</div></div>`;
+  const pf = isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞";
+  return `<div class="panel">
+    <h2>${title}</h2>
+    <div class="grid">
+      <div class="stat"><div class="k">Signals tested</div><div class="v num">${stats.count}</div></div>
+      <div class="stat"><div class="k">Win rate</div><div class="v num ${stats.winRate>=50?"up":"down"}">${stats.winRate.toFixed(1)}%</div></div>
+      <div class="stat"><div class="k">Avg win</div><div class="v num up">+${stats.avgWin.toFixed(2)}</div></div>
+      <div class="stat"><div class="k">Avg loss</div><div class="v num down">${stats.avgLoss.toFixed(2)}</div></div>
+      <div class="stat"><div class="k">Expectancy / trade</div><div class="v num ${stats.expectancy>=0?"up":"down"}">${stats.expectancy>=0?"+":""}${stats.expectancy.toFixed(2)}</div></div>
+      <div class="stat"><div class="k">Profit factor</div><div class="v num">${pf}</div></div>
+    </div>
+  </div>`;
+}
+
+async function loadAll(){
+  const key = $("apiKey").value.trim();
+  const btn = $("loadBtn");
+  $("errBox").textContent = "";
+  if(!key){ $("errBox").textContent = "Enter your Twelve Data API key first."; return; }
+  localStorage.setItem(KEY_STORE, key);
+  btn.disabled = true; btn.textContent = "Loading…";
+
+  try{
+    const [daily, intraday] = await Promise.all([
+      fetchSeries("XAU/USD","1day",500,key),
+      fetchSeries("XAU/USD","15min",2000,key)
+    ]);
+
+    const price = last(daily.closes);
+    const prevClose = daily.closes[daily.closes.length-2];
+    const chg = price - prevClose;
+    const chgPct = (chg/prevClose*100).toFixed(2);
+    $("priceVal").textContent = price.toFixed(2);
+    const chgEl = $("priceChg");
+    chgEl.className = "chg " + (chg>0?"up":chg<0?"down":"flat");
+    chgEl.textContent = (chg>=0?"+":"") + chg.toFixed(2) + " (" + (chg>=0?"+":"") + chgPct + "%) today";
+
+    // Monthly / trend module
+    const ema50 = ema(daily.closes,50), ema200 = ema(daily.closes,200);
+    const rsiDaily = rsi(daily.closes,14);
+    const atrDaily = atr(daily.highs, daily.lows, daily.closes, 14);
+    const e50 = last(ema50), e200 = last(ema200), r14 = last(rsiDaily), aD = last(atrDaily);
+    const c = daily.closes;
+    const fiveDayChg = c[c.length-1] - c[c.length-6];
+    const fiveDayPct = (fiveDayChg / c[c.length-6] * 100).toFixed(2);
+    let trendLabel, trendTone, trendWhy;
+    if(e50 > e200 && r14 > 50){
+      trendLabel="Bullish"; trendTone="up";
+      trendWhy=`EMA50 above EMA200 and RSI(14) at ${r14.toFixed(0)} — uptrend intact.`;
+    } else if(e50 < e200 && r14 < 50){
+      trendLabel="Bearish"; trendTone="down";
+      trendWhy=`EMA50 below EMA200 and RSI(14) at ${r14.toFixed(0)} — downtrend intact.`;
+    } else {
+      trendLabel="Neutral / mixed"; trendTone="flat";
+      trendWhy=`EMA and RSI(14)=${r14.toFixed(0)} disagree — trend is transitioning.`;
+    }
+
+    // Scalping module (15m)
+    const ema9 = ema(intraday.closes,9), ema21 = ema(intraday.closes,21);
+    const rsi15 = rsi(intraday.closes,14);
+    const atr14 = atr(intraday.highs, intraday.lows, intraday.closes, 14);
+    const e9=last(ema9), e21=last(ema21), r15=last(rsi15), a14=last(atr14);
+    let scalpLabel, scalpTone, scalpWhy;
+    if(e9 > e21 && r15 > 50 && r15 < 75){
+      scalpLabel="Buy bias"; scalpTone="up";
+      scalpWhy=`EMA9 above EMA21 on 15m, RSI(14)=${r15.toFixed(0)} — momentum favors longs.`;
+    } else if(e9 < e21 && r15 < 50 && r15 > 25){
+      scalpLabel="Sell bias"; scalpTone="down";
+      scalpWhy=`EMA9 below EMA21 on 15m, RSI(14)=${r15.toFixed(0)} — momentum favors shorts.`;
+    } else if(r15 >= 75){
+      scalpLabel="Overbought — caution"; scalpTone="down";
+      scalpWhy=`RSI(14)=${r15.toFixed(0)} on 15m — stretched, pullback risk.`;
+    } else if(r15 <= 25){
+      scalpLabel="Oversold — caution"; scalpTone="up";
+      scalpWhy=`RSI(14)=${r15.toFixed(0)} on 15m — stretched, bounce risk.`;
+    } else {
+      scalpLabel="No clear edge"; scalpTone="flat";
+      scalpWhy="EMA9/21 flat or crossing — wait for confirmation.";
+    }
+
+    // Backtest: same rules, walked forward through history with no lookahead
+    const monthlyTrades = runBacktest(daily.highs, daily.lows, daily.closes, ema50, ema200, rsiDaily, atrDaily,
+      trendToneAt, {stop:1.5, target:3}, 15, 205);
+    const scalpTrades = runBacktest(intraday.highs, intraday.lows, intraday.closes, ema9, ema21, rsi15, atr14,
+      scalpToneAt, {stop:1.5, target:3}, 40, 25);
+    const monthlyStats = summarize(monthlyTrades);
+    const scalpStats = summarize(scalpTrades);
+
+    $("content").innerHTML = `
+      <div class="panel">
+        <h2>MONTHLY TREND · DAILY CHART</h2>
+        ${verdictBlock(trendLabel, trendWhy, trendTone)}
+        <div class="grid">
+          <div class="stat"><div class="k">EMA 50</div><div class="v num">${e50.toFixed(2)}</div></div>
+          <div class="stat"><div class="k">EMA 200</div><div class="v num">${e200.toFixed(2)}</div></div>
+          <div class="stat"><div class="k">RSI (14, daily)</div><div class="v num">${r14.toFixed(1)}</div></div>
+          <div class="stat"><div class="k">Spread EMA50-200</div><div class="v num">${(e50-e200).toFixed(2)}</div></div>
+          <div class="stat"><div class="k">5-business-day change</div><div class="v num ${fiveDayChg>=0?"up":"down"}">${fiveDayChg>=0?"+":""}${fiveDayChg.toFixed(2)} (${fiveDayPct}%)</div></div>
+        </div>
+        ${tradeCallBlock(trendTone, price, aD, {entry:0.5, stop:1.5, target:3})}
+      </div>
+      <div class="panel">
+        <h2>SCALPING · 15-MIN CHART</h2>
+        ${verdictBlock(scalpLabel, scalpWhy, scalpTone)}
+        <div class="grid">
+          <div class="stat"><div class="k">EMA 9</div><div class="v num">${e9.toFixed(2)}</div></div>
+          <div class="stat"><div class="k">EMA 21</div><div class="v num">${e21.toFixed(2)}</div></div>
+          <div class="stat"><div class="k">RSI (14, 15m)</div><div class="v num">${r15.toFixed(1)}</div></div>
+          <div class="stat"><div class="k">ATR (14) — sizing</div><div class="v num">${a14.toFixed(2)}</div></div>
+        </div>
+        ${tradeCallBlock(scalpTone, price, a14, {entry:0.5, stop:1.5, target:3})}
+      </div>
+      ${backtestPanel("BACKTEST · MONTHLY RULES (~2yr daily data)", monthlyStats)}
+      ${backtestPanel("BACKTEST · SCALPING RULES (~20 days, 15m data)", scalpStats)}`;
+  } catch(e){
+    $("errBox").textContent = "Couldn't load data: " + e.message + ". Check your API key or try again.";
+  } finally {
+    btn.disabled = false; btn.textContent = "Load";
+  }
+}
+</script>
+</body>
+</html>
