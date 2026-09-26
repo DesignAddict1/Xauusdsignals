@@ -24,6 +24,17 @@ def main():
     data = fetch_series("XAU/USD", "15min", 100, api_key)
     closes, highs, lows = data["closes"], data["highs"], data["lows"]
 
+    print(f"[scalp] raw candles from API: {data['raw_count']}, after weekday filter: {len(closes)}")
+    print(f"[scalp] meta: {data['meta']}")
+    if data["times"]:
+        print(f"[scalp] range: {data['times'][0]} to {data['times'][-1]}")
+    if len(closes) < 22:
+        raise RuntimeError(
+            f"Only {len(closes)} usable candles — need at least 22 for EMA21/RSI14. "
+            "This usually means the API plan doesn't support this interval/outputsize, "
+            "or returned fewer rows than requested. See the [scalp] meta line above."
+        )
+
     ema9, ema21 = ema(closes, 9), ema(closes, 21)
     rsi14 = rsi(closes, 14)
     atr14 = atr(highs, lows, closes, 14)
