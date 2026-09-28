@@ -49,8 +49,9 @@ def main():
 
     print(f"[scalp] price={price:.2f} tone={sig.tone} label={sig.label} why={sig.why}")
 
-    last_tone = load_last_tone(STATE_NAME)
-    if sig.tone != "flat" and sig.tone != last_tone:
+        # Alert on every run with a directional bias, not just on a change —
+    # this repeats every 15 minutes for as long as the bias holds.
+    if sig.tone != "flat":
         lines = [
             f"*XAU/USD Scalp Signal — {sig.label}*",
             f"Price: `{price:.2f}`",
@@ -65,8 +66,8 @@ def main():
             ]
         send_telegram(bot_token, chat_id, "\n".join(lines))
         print("[scalp] alert sent")
-    else:
-        print("[scalp] no flip, no alert")
+        else:
+        print("[scalp] flat/neutral, no alert")
 
     save_last_tone(STATE_NAME, sig.tone)
 
