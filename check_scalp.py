@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Runs every 15 minutes via GitHub Actions. Checks the 15-min scalping
-signal and pings Telegram only when the bias flips to something new."""
+signal and pings Telegram on every run where a directional bias (buy or
+sell) is present — not just when it changes. Repeats every 15 minutes
+for as long as the bias holds."""
 
 import os
 import sys
@@ -21,7 +23,7 @@ def main():
     bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-        # outputsize is generous because Twelve Data pads through closed-market
+    # outputsize is generous because Twelve Data pads through closed-market
     # weekends with placeholder timestamps; those get stripped by the
     # weekday filter, so we need enough headroom to still have 22+ real
     # weekday candles left over after that filtering.
@@ -49,7 +51,7 @@ def main():
 
     print(f"[scalp] price={price:.2f} tone={sig.tone} label={sig.label} why={sig.why}")
 
-        # Alert on every run with a directional bias, not just on a change —
+    # Alert on every run with a directional bias, not just on a change —
     # this repeats every 15 minutes for as long as the bias holds.
     if sig.tone != "flat":
         lines = [
@@ -66,7 +68,7 @@ def main():
             ]
         send_telegram(bot_token, chat_id, "\n".join(lines))
         print("[scalp] alert sent")
-        else:
+    else:
         print("[scalp] flat/neutral, no alert")
 
     save_last_tone(STATE_NAME, sig.tone)
