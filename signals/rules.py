@@ -54,3 +54,56 @@ def trade_call(tone: str, price: float, atr_val: float,
     target = (entry_high + target_mult * atr_val) if is_buy else (entry_low - target_mult * atr_val)
 
     return TradeCall("BUY" if is_buy else "SELL", entry_low, entry_high, stop, target)
+
+
+
+# ---------------------------------------------------------------------------
+# Dual-RSI scalping on M15 — the RSI(5) + RSI(14) setup from your MT5 chart.
+#   BUY : RSI(14) > 50  and RSI(5) crosses UP through 30
+#   SELL: RSI(14) < 50  and RSI(5) crosses DOWN through 70
+# Tune the numbers below if the backtest says so.
+# ---------------------------------------------------------------------------
+RSI_FAST = 5
+RSI_SLOW = 14
+FAST_OVERSOLD = 30
+FAST_OVERBOUGHT = 70
+TREND_LINE = 50
+SCALP_STOP_ATR = 1.0
+SCALP_TARGET_ATR = 1.5
+
+
+def dual_rsi_signal(fast_prev: float, fast_now: float, slow_now: float) -> Signal:
+    if slow_now > TREND_LINE and fast_prev < FAST_OVERSOLD <= fast_now:
+        return Signal(
+            "up", "BUY setup",
+            f"RSI(14) {slow_now:.1f} is above {TREND_LINE} (uptrend) and RSI(5) turned up "
+            f"through {FAST_OVERSOLD} ({fast_prev:.1f} -> {fast_now:.1f}) — pullback looks done.",
+        )
+    if slow_now < TREND_LINE and fast_prev > FAST_OVERBOUGHT >= fast_now:
+        return Signal(
+            "down", "SELL setup",
+            f"RSI(14) {slow_now:.1f} is below {TREND_LINE} (downtrend) and RSI(5) turned down "
+            f"through {FAST_OVERBOUGHT} ({fast_prev:.1f} -> {fast_now:.1f}) — bounce looks done.",
+        )
+    return Signal(
+        "flat", "No setup",
+        f"RSI(5) {fast_now:.1f}, RSI(14) {slow_now:.1f} — no entry trigger on this candle.",
+    )
+
+
+@dataclass
+class ScalpTrade:
+    action: str
+    entry: float
+    stop: float
+    target: float
+
+
+def scalp_trade(tone: str, entry: float, atr_val: float,
+                stop_mult: float = SCALP_STOP_ATR,
+                target_mult: float = SCALP_TARGET_ATR) -> Optional[ScalpTrade]:
+    if tone == "flat" or atr_val is None:
+        return None
+    if tone == "up":
+        return ScalpTrade("BUY", entry, entry - stop_mult * atr_val, entry + target_mult * atr_val)
+    return ScalpTrade("SELL", entry, entry + stop_mult * atr_val, entry - target_mult * atr_val)
