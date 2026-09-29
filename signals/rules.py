@@ -56,33 +56,33 @@ def trade_call(tone: str, price: float, atr_val: float,
     return TradeCall("BUY" if is_buy else "SELL", entry_low, entry_high, stop, target)
 
 
-
 # ---------------------------------------------------------------------------
 # Dual-RSI scalping on M15 — the RSI(5) + RSI(14) setup from your MT5 chart.
-#   BUY : RSI(14) > 50  and RSI(5) crosses UP through 30
-#   SELL: RSI(14) < 50  and RSI(5) crosses DOWN through 70
-# Tune the numbers below if the backtest says so.
+#   BUY : RSI(14) > 40  and RSI(5) crosses UP through 30
+#   SELL: RSI(14) < 60  and RSI(5) crosses DOWN through 70
+# Judged on CLOSED candles only. Tune the numbers below if the backtest says so.
 # ---------------------------------------------------------------------------
 RSI_FAST = 5
 RSI_SLOW = 14
 FAST_OVERSOLD = 30
 FAST_OVERBOUGHT = 70
-TREND_LINE = 50
-SCALP_STOP_ATR = 1.0
-SCALP_TARGET_ATR = 1.5
+BUY_TREND_MIN = 40       # buys allowed while RSI(14) is above this
+SELL_TREND_MAX = 60      # sells allowed while RSI(14) is below this
+SCALP_STOP_ATR = 1.0     # stop-loss distance = 1.0 x ATR(14) on M15
+SCALP_TARGET_ATR = 1.5   # take-profit distance = 1.5 x ATR(14) on M15
 
 
 def dual_rsi_signal(fast_prev: float, fast_now: float, slow_now: float) -> Signal:
-    if slow_now > TREND_LINE and fast_prev < FAST_OVERSOLD <= fast_now:
+    if slow_now > BUY_TREND_MIN and fast_prev < FAST_OVERSOLD <= fast_now:
         return Signal(
             "up", "BUY setup",
-            f"RSI(14) {slow_now:.1f} is above {TREND_LINE} (uptrend) and RSI(5) turned up "
+            f"RSI(14) {slow_now:.1f} is above {BUY_TREND_MIN} and RSI(5) turned up "
             f"through {FAST_OVERSOLD} ({fast_prev:.1f} -> {fast_now:.1f}) — pullback looks done.",
         )
-    if slow_now < TREND_LINE and fast_prev > FAST_OVERBOUGHT >= fast_now:
+    if slow_now < SELL_TREND_MAX and fast_prev > FAST_OVERBOUGHT >= fast_now:
         return Signal(
             "down", "SELL setup",
-            f"RSI(14) {slow_now:.1f} is below {TREND_LINE} (downtrend) and RSI(5) turned down "
+            f"RSI(14) {slow_now:.1f} is below {SELL_TREND_MAX} and RSI(5) turned down "
             f"through {FAST_OVERBOUGHT} ({fast_prev:.1f} -> {fast_now:.1f}) — bounce looks done.",
         )
     return Signal(
@@ -93,7 +93,7 @@ def dual_rsi_signal(fast_prev: float, fast_now: float, slow_now: float) -> Signa
 
 @dataclass
 class ScalpTrade:
-    action: str
+    action: str   # "BUY" | "SELL"
     entry: float
     stop: float
     target: float
