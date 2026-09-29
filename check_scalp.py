@@ -1,21 +1,36 @@
 #!/usr/bin/env python3
-"""Runs every 15 minutes via GitHub Actions. Checks the 15-min scalping
-signal and pings Telegram on every run where a directional bias (buy or
-sell) is present — not just when it changes. Repeats every 15 minutes
-for as long as the bias holds."""
+"""Dual-RSI scalping on XAU/USD M15: RSI(14) gives the direction, RSI(5)
+gives the entry. One Telegram alert per setup, on closed candles only."""
 
+import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from signals.data import fetch_series
-from signals.indicators import ema, rsi, atr
-from signals.rules import scalp_signal, trade_call
+from signals.indicators import rsi, atr
+from signals.rules import dual_rsi_signal, scalp_trade, RSI_FAST, RSI_SLOW
 from signals.alerts import send_telegram
-from signals.state import load_last_tone, save_last_tone
+from signals.state import STATE_DIR
 
-STATE_NAME = "scalp"
+STATE_FILE = os.path.join(STATE_DIR, "scalp.json")
+BAR = timedelta(minutes=15)
+STALE_AFTER = timedelta(minutes=30)
+
+
+def load_state() -> dict:
+    if not os.path.exists(STATE_FILE):
+        return {}
+    with open(STATE_FILE) as f:
+        return json.load(f)
+
+
+def save_state(state: dict) -> None:
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 
 def main():
@@ -23,55 +38,57 @@ def main():
     bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-    # outputsize is generous because Twelve Data pads through closed-market
-    # weekends with placeholder timestamps; those get stripped by the
-    # weekday filter, so we need enough headroom to still have 22+ real
-    # weekday candles left over after that filtering.
     data = fetch_series("XAU/USD", "15min", 300, api_key)
-    closes, highs, lows = data["closes"], data["highs"], data["lows"]
+    closes, highs, lows, times = data["closes"], data["highs"], data["lows"], data["times"]
 
-    print(f"[scalp] raw candles from API: {data['raw_count']}, after weekday filter: {len(closes)}")
-    print(f"[scalp] meta: {data['meta']}")
-    if data["times"]:
-        print(f"[scalp] range: {data['times'][0]} to {data['times'][-1]}")
-    if len(closes) < 22:
-        raise RuntimeError(
-            f"Only {len(closes)} usable candles — need at least 22 for EMA21/RSI14. "
-            "This usually means the API plan doesn't support this interval/outputsize, "
-            "or returned fewer rows than requested. See the [scalp] meta line above."
-        )
+    print(f"[scalp] candles after weekday filter: {len(closes)} (raw {data['raw_count']})")
+    if len(closes) < 30:
+        raise RuntimeError(f"Only {len(closes)} usable candles — need at least 30. meta: {data['meta']}")
 
-    ema9, ema21 = ema(closes, 9), ema(closes, 21)
-    rsi14 = rsi(closes, 14)
+    now = datetime.now(timezone.utc)
+    last_open = datetime.strptime(times[-1], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    i = len(closes) - 1 if last_open + BAR <= now else len(closes) - 2
+    bar_time = times[i]
+    bar_close_time = datetime.strptime(bar_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) + BAR
+
+    rsi_fast = rsi(closes, RSI_FAST)
+    rsi_slow = rsi(closes, RSI_SLOW)
     atr14 = atr(highs, lows, closes, 14)
 
-    price = closes[-1]
-    sig = scalp_signal(ema9[-1], ema21[-1], rsi14[-1])
-    call = trade_call(sig.tone, price, atr14[-1])
+    sig = dual_rsi_signal(rsi_fast[i - 1], rsi_fast[i], rsi_slow[i])
+    print(f"[scalp] candle {bar_time} UTC close={closes[i]:.2f} "
+          f"RSI(5) {rsi_fast[i - 1]:.1f}->{rsi_fast[i]:.1f} RSI(14)={rsi_slow[i]:.1f} -> {sig.label}")
 
-    print(f"[scalp] price={price:.2f} tone={sig.tone} label={sig.label} why={sig.why}")
+    state = load_state()
 
-    # Alert on every run with a directional bias, not just on a change —
-    # this repeats every 15 minutes for as long as the bias holds.
-    if sig.tone != "flat":
-        lines = [
-            f"*XAU/USD Scalp Signal — {sig.label}*",
-            f"Price: `{price:.2f}`",
-            sig.why,
-        ]
-        if call.action != "NONE":
-            lines += [
-                "",
-                f"*{call.action} {call.entry_low:.2f} – {call.entry_high:.2f}*",
-                f"Stop: `{call.stop:.2f}`   Target: `{call.target:.2f}`",
-                "_ATR-based levels, ~1:2 risk-reward. Not financial advice — confirm before entering._",
-            ]
-        send_telegram(bot_token, chat_id, "\n".join(lines))
-        print("[scalp] alert sent")
+    if sig.tone == "flat":
+        print("[scalp] no setup, no alert")
+    elif now - bar_close_time > STALE_AFTER:
+        print(f"[scalp] setup is on an old candle ({bar_time}) — market closed or data delayed, not alerting")
+    elif state.get("last_alert_bar") == bar_time:
+        print("[scalp] already alerted for this candle")
     else:
-        print("[scalp] flat/neutral, no alert")
+        trade = scalp_trade(sig.tone, closes[i], atr14[i])
+        lagos_time = (bar_close_time + timedelta(hours=1)).strftime("%H:%M")
+        lines = [
+            f"*XAU/USD M15 — {trade.action} setup*",
+            f"Candle closed {lagos_time} (Lagos) at `{closes[i]:.2f}`",
+            f"RSI(5): `{rsi_fast[i - 1]:.1f}` -> `{rsi_fast[i]:.1f}`   RSI(14): `{rsi_slow[i]:.1f}`",
+            "",
+            f"*{trade.action}* near `{trade.entry:.2f}`",
+            f"Stop-loss: `{trade.stop:.2f}`",
+            f"Take-profit: `{trade.target:.2f}`",
+            "",
+            "Prices come from Twelve Data and can differ by a few points from your broker. "
+            "Not financial advice.",
+        ]
+        send_telegram(bot_token, chat_id, "\n".join(lines))
+        state["last_alert_bar"] = bar_time
+        print("[scalp] alert sent")
 
-    save_last_tone(STATE_NAME, sig.tone)
+    state["last_checked_bar"] = bar_time
+    state["tone"] = sig.tone
+    save_state(state)
 
 
 if __name__ == "__main__":
