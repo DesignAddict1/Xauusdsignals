@@ -20,6 +20,7 @@ def fetch_series(symbol: str, interval: str, outputsize: int, api_key: str) -> D
             "symbol": symbol,
             "interval": interval,
             "outputsize": outputsize,
+            "timezone": "UTC",  # so we can tell whether the latest candle has closed
             "apikey": api_key,
         },
         timeout=30,
@@ -28,8 +29,6 @@ def fetch_series(symbol: str, interval: str, outputsize: int, api_key: str) -> D
     if data.get("status") == "error" or data.get("code"):
         raise RuntimeError(data.get("message", "Twelve Data API error"))
     if "values" not in data:
-        # Free-tier plan limits sometimes come back as status "ok" with no
-        # values and an explanatory message instead of an error code.
         raise RuntimeError(f"No 'values' in response — raw response: {data}")
 
     raw_count = len(data["values"])
