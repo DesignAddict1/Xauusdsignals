@@ -69,7 +69,7 @@ FAST_OVERBOUGHT = 70
 BUY_TREND_MIN = 40       # buys allowed while RSI(14) is above this
 SELL_TREND_MAX = 60      # sells allowed while RSI(14) is below this
 SCALP_STOP_ATR = 1.0     # stop-loss distance = 1.0 x ATR(14) on M15
-SCALP_TARGET_ATR = 1.5   # take-profit distance = 1.5 x ATR(14) on M15
+SCALP_TARGET_ATR = 3.0   # take-profit distance = 3.0 x ATR(14) on M15 (risk 1 : reward 3)
 
 
 def dual_rsi_signal(fast_prev: float, fast_now: float, slow_now: float) -> Signal:
